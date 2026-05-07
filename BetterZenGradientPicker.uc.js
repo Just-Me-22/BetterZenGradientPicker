@@ -278,6 +278,36 @@ const ZenPickerMods = {
     },
   },
 
+  setBackgroundStyles(picker, gradient, toolbarGradient) {
+    const browserBg =
+      picker?.browserBackgroundElement ||
+      document.getElementById("zen-browser-background") ||
+      document.documentElement;
+    const toolbarBg =
+      picker?.toolbarBackgroundElement ||
+      document.getElementById("zen-toolbar-background") ||
+      document.documentElement;
+
+    browserBg.style.setProperty("--zen-main-browser-background", gradient);
+    toolbarBg.style.setProperty(
+      "--zen-main-browser-background-toolbar",
+      toolbarGradient,
+    );
+
+    if (browserBg !== document.documentElement) {
+      document.documentElement.style.setProperty(
+        "--zen-main-browser-background",
+        gradient,
+      );
+    }
+    if (toolbarBg !== document.documentElement) {
+      document.documentElement.style.setProperty(
+        "--zen-main-browser-background-toolbar",
+        toolbarGradient,
+      );
+    }
+  },
+
   log(msg, ...args) {
     console.log(`[BetterZenGradientPicker] ${msg}`, ...args);
   },
@@ -1197,6 +1227,67 @@ class RotationModule {
     };
   }
 
+  getSingleRGBColorCompat(picker, color, forToolbar = false) {
+    if (typeof picker.getSingleRGBColor === "function") {
+      return picker.getSingleRGBColor(color, forToolbar);
+    }
+
+    if (color?.isCustom) {
+      return color.c;
+    }
+
+    let rgb = Array.isArray(color?.c)
+      ? color.c
+      : String(color?.c || "")
+          .match(/\d+/g)
+          ?.slice(0, 3)
+          .map(Number);
+    if (!rgb || rgb.length < 3) {
+      rgb = [0, 0, 0];
+    }
+
+    let opacity = Number.isFinite(picker.currentOpacity)
+      ? picker.currentOpacity
+      : 0.5;
+    const canBeTransparent = !!picker.canBeTransparent;
+    let allowTransparencyOnSidebar = false;
+    try {
+      allowTransparencyOnSidebar = Services.prefs.getBoolPref(
+        "zen.theme.acrylic-elements",
+        false,
+      );
+    } catch (e) {}
+
+    if (
+      (forToolbar && !allowTransparencyOnSidebar) ||
+      (!forToolbar && !canBeTransparent)
+    ) {
+      const base =
+        typeof picker.getToolbarModifiedBaseRaw === "function"
+          ? picker.getToolbarModifiedBaseRaw().slice(0, 3)
+          : picker.isDarkMode
+            ? [23, 23, 26]
+            : [240, 240, 244];
+      rgb =
+        typeof picker.blendColors === "function"
+          ? picker.blendColors(rgb, base, canBeTransparent ? 90 : opacity * 100)
+          : rgb;
+      opacity = 1;
+    }
+
+    if (picker.isLegacyVersion && picker.isDarkMode) {
+      rgb =
+        typeof picker.blendColors === "function"
+          ? picker.blendColors(rgb, [0, 0, 0], 30)
+          : rgb;
+    }
+
+    if (typeof picker.blendWithWhiteOverlay === "function") {
+      return picker.blendWithWhiteOverlay(rgb, opacity);
+    }
+    return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity})`;
+  }
+
   patchGradient(picker) {
     const self = this;
     const orig = picker.getGradient.bind(picker);
@@ -1227,7 +1318,8 @@ class RotationModule {
       if (themedColors.length <= 1) return nativeResult;
 
       const displayDelta = self.displayAngle;
-      const getCol = (c) => this.getSingleRGBColor(c, forToolbar);
+      const getCol = (c) =>
+        self.getSingleRGBColorCompat(this, c, forToolbar);
       const cols = themedColors.map(getCol);
 
       if (themedColors.find((c) => c.isCustom)) {
@@ -2529,11 +2621,7 @@ class PaletteModule {
     const gradient = picker.getGradient(updatedColors);
     const toolbarGradient = picker.getGradient(updatedColors, true);
 
-    docElem.style.setProperty("--zen-main-browser-background", gradient);
-    docElem.style.setProperty(
-      "--zen-main-browser-background-toolbar",
-      toolbarGradient,
-    );
+    ZenPickerMods.setBackgroundStyles(picker, gradient, toolbarGradient);
 
     // 3. Update Primary/Accent UI Color
     const dominant = picker.getMostDominantColor(updatedColors);
@@ -2956,11 +3044,7 @@ class DynamicThemeModule {
 
     const gradient = picker.getGradient(updatedColors);
     const toolbarGradient = picker.getGradient(updatedColors, true);
-    docElem.style.setProperty("--zen-main-browser-background", gradient);
-    docElem.style.setProperty(
-      "--zen-main-browser-background-toolbar",
-      toolbarGradient,
-    );
+    ZenPickerMods.setBackgroundStyles(picker, gradient, toolbarGradient);
 
     const dominant = picker.getMostDominantColor(updatedColors);
     if (dominant) {
@@ -3371,12 +3455,9 @@ class DynamicThemeModule {
             const docElem = document.documentElement;
             const gradient = picker.getGradient(updatedColors);
             const toolbarGradient = picker.getGradient(updatedColors, true);
-            docElem.style.setProperty(
-              "--zen-main-browser-background",
+            ZenPickerMods.setBackgroundStyles(
+              picker,
               gradient,
-            );
-            docElem.style.setProperty(
-              "--zen-main-browser-background-toolbar",
               toolbarGradient,
             );
             const dominant = picker.getMostDominantColor(updatedColors);
